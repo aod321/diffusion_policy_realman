@@ -43,8 +43,8 @@ class RealEnv:
             obs_key_map=DEFAULT_OBS_KEY_MAP,
             obs_float32=False,
             # action
-            max_pos_speed=0.25,
-            max_rot_speed=0.6,
+            max_pos_speed=0.1,
+            max_rot_speed=0.3,
             # robot
             tcp_offset=0.13,
             init_joints=False,
@@ -56,6 +56,8 @@ class RealEnv:
             realman_udp_cycle=2,
             realman_num_joints=7,
             realman_host_ip='0.0.0.0',
+            realman_follow=False,
+            realman_lookahead_time=0.0,
             # video capture params
             video_capture_fps=30,
             video_capture_resolution=(1280,720),
@@ -84,78 +86,84 @@ class RealEnv:
         if camera_serial_numbers is None:
             camera_serial_numbers = SingleRealsense.get_connected_devices_serial()
 
-        color_tf = get_image_transform(
-            input_res=video_capture_resolution,
-            output_res=obs_image_resolution, 
-            # obs output rgb
-            bgr_to_rgb=True)
-        color_transform = color_tf
-        if obs_float32:
-            color_transform = lambda x: color_tf(x).astype(np.float32) / 255
-
-        def transform(data):
-            data['color'] = color_transform(data['color'])
-            return data
-        
-        rw, rh, col, row = optimal_row_cols(
-            n_cameras=len(camera_serial_numbers),
-            in_wh_ratio=obs_image_resolution[0]/obs_image_resolution[1],
-            max_resolution=multi_cam_vis_resolution
-        )
-        vis_color_transform = get_image_transform(
-            input_res=video_capture_resolution,
-            output_res=(rw,rh),
-            bgr_to_rgb=False
-        )
-        def vis_transform(data):
-            data['color'] = vis_color_transform(data['color'])
-            return data
-
-        recording_transfrom = None
-        recording_fps = video_capture_fps
-        recording_pix_fmt = 'bgr24'
-        if not record_raw_video:
-            recording_transfrom = transform
-            recording_fps = frequency
-            recording_pix_fmt = 'rgb24'
-
-        video_recorder = VideoRecorder.create_h264(
-            fps=recording_fps, 
-            codec='h264',
-            input_pix_fmt=recording_pix_fmt, 
-            crf=video_crf,
-            thread_type='FRAME',
-            thread_count=thread_per_video)
-
-        realsense = MultiRealsense(
-            serial_numbers=camera_serial_numbers,
-            shm_manager=shm_manager,
-            resolution=video_capture_resolution,
-            capture_fps=video_capture_fps,
-            put_fps=video_capture_fps,
-            # send every frame immediately after arrival
-            # ignores put_fps
-            put_downsample=False,
-            record_fps=recording_fps,
-            enable_color=True,
-            enable_depth=False,
-            enable_infrared=False,
-            get_max_k=max_obs_buffer_size,
-            transform=transform,
-            vis_transform=vis_transform,
-            recording_transform=recording_transfrom,
-            video_recorder=video_recorder,
-            verbose=False
-            )
-        
+        n_cameras = len(camera_serial_numbers)
+        realsense = None
         multi_cam_vis = None
-        if enable_multi_cam_vis:
-            multi_cam_vis = MultiCameraVisualizer(
-                realsense=realsense,
-                row=row,
-                col=col,
-                rgb_to_bgr=False
+
+        if n_cameras > 0:
+            color_tf = get_image_transform(
+                input_res=video_capture_resolution,
+                output_res=obs_image_resolution,
+                # obs output rgb
+                bgr_to_rgb=True)
+            color_transform = color_tf
+            if obs_float32:
+                color_transform = lambda x: color_tf(x).astype(np.float32) / 255
+
+            def transform(data):
+                data['color'] = color_transform(data['color'])
+                return data
+
+            rw, rh, col, row = optimal_row_cols(
+                n_cameras=n_cameras,
+                in_wh_ratio=obs_image_resolution[0]/obs_image_resolution[1],
+                max_resolution=multi_cam_vis_resolution
             )
+            vis_color_transform = get_image_transform(
+                input_res=video_capture_resolution,
+                output_res=(rw,rh),
+                bgr_to_rgb=False
+            )
+            def vis_transform(data):
+                data['color'] = vis_color_transform(data['color'])
+                return data
+
+            recording_transfrom = None
+            recording_fps = video_capture_fps
+            recording_pix_fmt = 'bgr24'
+            if not record_raw_video:
+                recording_transfrom = transform
+                recording_fps = frequency
+                recording_pix_fmt = 'rgb24'
+
+            video_recorder = VideoRecorder.create_h264(
+                fps=recording_fps,
+                codec='h264',
+                input_pix_fmt=recording_pix_fmt,
+                crf=video_crf,
+                thread_type='FRAME',
+                thread_count=thread_per_video)
+
+            realsense = MultiRealsense(
+                serial_numbers=camera_serial_numbers,
+                shm_manager=shm_manager,
+                resolution=video_capture_resolution,
+                capture_fps=video_capture_fps,
+                put_fps=video_capture_fps,
+                # send every frame immediately after arrival
+                # ignores put_fps
+                put_downsample=False,
+                record_fps=recording_fps,
+                enable_color=True,
+                enable_depth=False,
+                enable_infrared=False,
+                get_max_k=max_obs_buffer_size,
+                transform=transform,
+                vis_transform=vis_transform,
+                recording_transform=recording_transfrom,
+                video_recorder=video_recorder,
+                verbose=False
+                )
+
+            if enable_multi_cam_vis:
+                multi_cam_vis = MultiCameraVisualizer(
+                    realsense=realsense,
+                    row=row,
+                    col=col,
+                    rgb_to_bgr=False
+                )
+        else:
+            print('No RealSense cameras detected. Running without cameras.')
 
         cube_diag = np.linalg.norm([1,1,1])
 
@@ -212,6 +220,8 @@ class RealEnv:
                 udp_cycle=realman_udp_cycle,
                 num_joints=realman_num_joints,
                 host_ip=realman_host_ip,
+                follow=realman_follow,
+                lookahead_time=realman_lookahead_time,
             )
         self.realsense = realsense
         self.robot = robot
@@ -239,10 +249,14 @@ class RealEnv:
     # ======== start-stop API =============
     @property
     def is_ready(self):
-        return self.realsense.is_ready and self.robot.is_ready
-    
+        ready = self.robot.is_ready
+        if self.realsense is not None:
+            ready = ready and self.realsense.is_ready
+        return ready
+
     def start(self, wait=True):
-        self.realsense.start(wait=False)
+        if self.realsense is not None:
+            self.realsense.start(wait=False)
         self.robot.start(wait=False)
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.start(wait=False)
@@ -254,19 +268,22 @@ class RealEnv:
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.stop(wait=False)
         self.robot.stop(wait=False)
-        self.realsense.stop(wait=False)
+        if self.realsense is not None:
+            self.realsense.stop(wait=False)
         if wait:
             self.stop_wait()
 
     def start_wait(self):
-        self.realsense.start_wait()
+        if self.realsense is not None:
+            self.realsense.start_wait()
         self.robot.start_wait()
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.start_wait()
-    
+
     def stop_wait(self):
         self.robot.stop_wait()
-        self.realsense.stop_wait()
+        if self.realsense is not None:
+            self.realsense.stop_wait()
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.stop_wait()
 
@@ -283,34 +300,39 @@ class RealEnv:
         "observation dict"
         assert self.is_ready
 
-        # get data
-        # 30 Hz, camera_receive_timestamp
-        k = math.ceil(self.n_obs_steps * (self.video_capture_fps / self.frequency))
-        self.last_realsense_data = self.realsense.get(
-            k=k, 
-            out=self.last_realsense_data)
-
         # 125 hz, robot_receive_timestamp
         last_robot_data = self.robot.get_all_state()
-        # both have more than n_obs_steps data
-
-        # align camera obs timestamps
         dt = 1 / self.frequency
-        last_timestamp = np.max([x['timestamp'][-1] for x in self.last_realsense_data.values()])
-        obs_align_timestamps = last_timestamp - (np.arange(self.n_obs_steps)[::-1] * dt)
 
         camera_obs = dict()
-        for camera_idx, value in self.last_realsense_data.items():
-            this_timestamps = value['timestamp']
-            this_idxs = list()
-            for t in obs_align_timestamps:
-                is_before_idxs = np.nonzero(this_timestamps < t)[0]
-                this_idx = 0
-                if len(is_before_idxs) > 0:
-                    this_idx = is_before_idxs[-1]
-                this_idxs.append(this_idx)
-            # remap key
-            camera_obs[f'camera_{camera_idx}'] = value['color'][this_idxs]
+        if self.realsense is not None:
+            # get data
+            # 30 Hz, camera_receive_timestamp
+            k = math.ceil(self.n_obs_steps * (self.video_capture_fps / self.frequency))
+            self.last_realsense_data = self.realsense.get(
+                k=k,
+                out=self.last_realsense_data)
+
+            # align camera obs timestamps
+            last_timestamp = np.max([x['timestamp'][-1] for x in self.last_realsense_data.values()])
+            obs_align_timestamps = last_timestamp - (np.arange(self.n_obs_steps)[::-1] * dt)
+
+            for camera_idx, value in self.last_realsense_data.items():
+                this_timestamps = value['timestamp']
+                this_idxs = list()
+                for t in obs_align_timestamps:
+                    is_before_idxs = np.nonzero(this_timestamps < t)[0]
+                    this_idx = 0
+                    if len(is_before_idxs) > 0:
+                        this_idx = is_before_idxs[-1]
+                    this_idxs.append(this_idx)
+                # remap key
+                camera_obs[f'camera_{camera_idx}'] = value['color'][this_idxs]
+        else:
+            # no camera, use robot timestamps for alignment
+            robot_timestamps = last_robot_data['robot_receive_timestamp']
+            last_timestamp = robot_timestamps[-1]
+            obs_align_timestamps = last_timestamp - (np.arange(self.n_obs_steps)[::-1] * dt)
 
         # align robot obs
         robot_timestamps = last_robot_data['robot_receive_timestamp']
@@ -327,7 +349,7 @@ class RealEnv:
         for k, v in last_robot_data.items():
             if k in self.obs_key_map:
                 robot_obs_raw[self.obs_key_map[k]] = v
-        
+
         robot_obs = dict()
         for k, v in robot_obs_raw.items():
             robot_obs[k] = v[this_idxs]
@@ -401,15 +423,16 @@ class RealEnv:
         episode_id = self.replay_buffer.n_episodes
         this_video_dir = self.video_dir.joinpath(str(episode_id))
         this_video_dir.mkdir(parents=True, exist_ok=True)
-        n_cameras = self.realsense.n_cameras
-        video_paths = list()
-        for i in range(n_cameras):
-            video_paths.append(
-                str(this_video_dir.joinpath(f'{i}.mp4').absolute()))
-        
+
         # start recording on realsense
-        self.realsense.restart_put(start_time=start_time)
-        self.realsense.start_recording(video_path=video_paths, start_time=start_time)
+        if self.realsense is not None:
+            n_cameras = self.realsense.n_cameras
+            video_paths = list()
+            for i in range(n_cameras):
+                video_paths.append(
+                    str(this_video_dir.joinpath(f'{i}.mp4').absolute()))
+            self.realsense.restart_put(start_time=start_time)
+            self.realsense.start_recording(video_path=video_paths, start_time=start_time)
 
         # create accumulators
         self.obs_accumulator = TimestampObsAccumulator(
@@ -431,7 +454,8 @@ class RealEnv:
         assert self.is_ready
         
         # stop video recorder
-        self.realsense.stop_recording()
+        if self.realsense is not None:
+            self.realsense.stop_recording()
 
         if self.obs_accumulator is not None:
             # recording

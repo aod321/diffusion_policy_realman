@@ -37,7 +37,9 @@ from diffusion_policy.real_world.keystroke_counter import (
 @click.option('--frequency', '-f', default=10, type=float, help="Control frequency in Hz.")
 @click.option('--command_latency', '-cl', default=0.01, type=float, help="Latency between receiving SapceMouse command to executing on Robot in Sec.")
 @click.option('--robot_type', '-rt', default='ur5', type=click.Choice(['ur5', 'realman']), help="Robot type: ur5 or realman.")
-def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_latency, robot_type):
+@click.option('--follow', is_flag=True, default=False, help="Realman: enable high-follow mode (use with --lookahead).")
+@click.option('--lookahead', default=0.0, type=float, help="Realman: command-side lookahead smoothing in seconds (e.g. 0.1).")
+def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_latency, robot_type, follow, lookahead):
     dt = 1/frequency
     with SharedMemoryManager() as shm_manager:
         with KeystrokeCounter() as key_counter, \
@@ -56,14 +58,18 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
                 # video recording quality, lower is better (but slower).
                 video_crf=21,
                 shm_manager=shm_manager,
-                robot_type=robot_type
+                robot_type=robot_type,
+                realman_follow=follow,
+                realman_lookahead_time=lookahead
             ) as env:
             cv2.setNumThreads(1)
 
-            # realsense exposure
-            env.realsense.set_exposure(exposure=120, gain=0)
-            # realsense white balance
-            env.realsense.set_white_balance(white_balance=5900)
+            has_camera = env.realsense is not None
+            if has_camera:
+                # realsense exposure
+                env.realsense.set_exposure(exposure=120, gain=0)
+                # realsense white balance
+                env.realsense.set_white_balance(white_balance=5900)
 
             time.sleep(1.0)
             print('Ready!')
@@ -110,48 +116,63 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
                 stage = key_counter[Key.space]
 
                 # visualize
-                vis_img = obs[f'camera_{vis_camera_idx}'][-1,:,:,::-1].copy()
-                episode_id = env.replay_buffer.n_episodes
-                text = f'Episode: {episode_id}, Stage: {stage}'
-                if is_recording:
-                    text += ', Recording!'
-                cv2.putText(
-                    vis_img,
-                    text,
-                    (10,30),
-                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale=1,
-                    thickness=2,
-                    color=(255,255,255)
-                )
+                if has_camera:
+                    vis_img = obs[f'camera_{vis_camera_idx}'][-1,:,:,::-1].copy()
+                    episode_id = env.replay_buffer.n_episodes
+                    text = f'Episode: {episode_id}, Stage: {stage}'
+                    if is_recording:
+                        text += ', Recording!'
+                    cv2.putText(
+                        vis_img,
+                        text,
+                        (10,30),
+                        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=1,
+                        thickness=2,
+                        color=(255,255,255)
+                    )
 
-                cv2.imshow('default', vis_img)
-                cv2.pollKey()
+                    cv2.imshow('default', vis_img)
+                    cv2.pollKey()
 
                 precise_wait(t_sample)
                 # get teleop command
                 sm_state = sm.get_motion_state_transformed()
-                # print(sm_state)
                 dpos = sm_state[:3] * (env.max_pos_speed / frequency)
                 drot_xyz = sm_state[3:] * (env.max_rot_speed / frequency)
-                
-                if not sm.is_button_pressed(0):
+
+                btn0 = sm.is_button_pressed(0)
+                btn1 = sm.is_button_pressed(1)
+                if not btn0:
                     # translation mode
                     drot_xyz[:] = 0
                 else:
                     dpos[:] = 0
-                if not sm.is_button_pressed(1):
+                if not btn1:
                     # 2D translation mode
-                    dpos[2] = 0    
+                    dpos[2] = 0
 
                 drot = st.Rotation.from_euler('xyz', drot_xyz)
                 target_pose[:3] += dpos
                 target_pose[3:] = (drot * st.Rotation.from_rotvec(
                     target_pose[3:])).as_rotvec()
 
+                # debug print every 10 iterations (~1s at 10Hz)
+                if iter_idx % 10 == 0:
+                    cur_state = env.get_robot_state()
+                    cur_pose = cur_state.get('ActualTCPPose', None)
+                    np.set_printoptions(precision=4, suppress=True)
+                    print(f'--- iter {iter_idx} ---')
+                    print(f'  sm_raw:  {sm_state}')
+                    print(f'  btn0={btn0} btn1={btn1}')
+                    print(f'  dpos:    {dpos}')
+                    print(f'  drot:    {drot_xyz}')
+                    print(f'  target:  {target_pose}')
+                    print(f'  actual:  {cur_pose}')
+
                 # execute teleop command
                 env.exec_actions(
-                    actions=[target_pose], 
+                    actions=[target_pose],
                     timestamps=[t_command_target-time.monotonic()+time.time()],
                     stages=[stage])
                 precise_wait(t_cycle_end)

@@ -103,6 +103,7 @@ class RealmanTCPClient:
 
     def connect(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.sock.settimeout(5.0)
         self.sock.connect((self.robot_ip, self.tcp_port))
         self.sock.settimeout(2.0)
@@ -279,13 +280,15 @@ class RealmanInterpolationController(mp.Process):
             udp_port=8089,
             udp_cycle=2,  # 2 = 10ms push cycle
             num_joints=7,
-            follow=True,
+            follow=False,
+            lookahead_time=0.0,  # seconds, 0=disabled, >0 enables command-side smoothing (use with follow=True)
             host_ip='0.0.0.0',
             ):
         # verify
         assert 0 < frequency <= 200
         assert 0 < max_pos_speed
         assert 0 < max_rot_speed
+        assert lookahead_time >= 0
         if joints_init is not None:
             joints_init = np.array(joints_init)
             assert joints_init.shape == (num_joints,)
@@ -305,6 +308,7 @@ class RealmanInterpolationController(mp.Process):
         self.udp_cycle = udp_cycle
         self.num_joints = num_joints
         self.follow = follow
+        self.lookahead_time = lookahead_time
         self.host_ip = host_ip
 
         # build input queue
@@ -502,16 +506,66 @@ class RealmanInterpolationController(mp.Process):
 
             # Main loop
             dt = 1. / self.frequency
+            # Command-side lookahead smoothing (open-loop, no feedback)
+            # Mimics UR5 servoL's lookahead_time: first-order low-pass on command
+            use_smoothing = self.lookahead_time > 0
+            if use_smoothing:
+                smooth_alpha = dt / (self.lookahead_time + dt)
+                smoothed_pose = curr_pose.copy()
+
+            # Dynamic follow state tracking
+            prev_target = curr_pose.copy()
+            follow_cooldown = 0  # frames to keep follow=True after motion stops
+            was_following = False
+
             iter_idx = 0
             keep_running = True
+            # Frequency logging
+            freq_log_interval = self.frequency  # log every ~1 second
+            freq_samples = []
             while keep_running:
                 t_start = time.perf_counter()
 
-                # Send command to robot
+                # Get interpolated target
                 t_now = time.monotonic()
-                pose_command = pose_interp(t_now)
-                pose_quat = pose_to_realman_quat(pose_command)
-                tcp_client.movep_canfd(pose_quat, follow=self.follow)
+                pose_target = pose_interp(t_now)
+
+                # Dynamic follow: follow=True only while target is changing
+                target_delta = np.linalg.norm(pose_target[:3] - prev_target[:3])
+                if target_delta > 5e-5:  # ~0.05mm/frame ≈ 5mm/s @100Hz
+                    follow_cooldown = 50  # 500ms cooldown at 100Hz
+                if self.follow and follow_cooldown > 0:
+                    frame_follow = True
+                    follow_cooldown -= 1
+                else:
+                    frame_follow = False
+                prev_target = pose_target.copy()
+
+                # Apply command-side smoothing if enabled
+                if use_smoothing:
+                    # Reset smoothed_pose on follow=False→True transition
+                    if frame_follow and not was_following:
+                        smoothed_pose = prev_pose.copy()
+                was_following = frame_follow
+                if use_smoothing:
+                    # Position: first-order low-pass filter
+                    smoothed_pose[:3] += smooth_alpha * (pose_target[:3] - smoothed_pose[:3])
+                    # Rotation: Slerp-based smoothing
+                    rot_smooth = st.Rotation.from_rotvec(smoothed_pose[3:])
+                    rot_target = st.Rotation.from_rotvec(pose_target[3:])
+                    rot_blended = st.Slerp([0, 1], st.Rotation.concatenate(
+                        [rot_smooth, rot_target]))([smooth_alpha])[0]
+                    smoothed_pose[3:] = rot_blended.as_rotvec()
+                    send_pose = smoothed_pose
+                else:
+                    send_pose = pose_target
+
+                pose_quat = pose_to_realman_quat(send_pose)
+                try:
+                    tcp_client.movep_canfd(pose_quat, follow=frame_follow)
+                except socket.timeout:
+                    if self.verbose:
+                        print("[RealmanPositionalController] movep_canfd send timeout, skipping frame")
 
                 # Read latest UDP state and convert
                 udp_state = udp_receiver.get_latest_state()
@@ -550,7 +604,7 @@ class RealmanInterpolationController(mp.Process):
                         elif key == 'ActualQd':
                             state[key] = joint_velocities
                         elif key == 'TargetTCPPose':
-                            state[key] = pose_command.copy()
+                            state[key] = pose_target.copy()
                         elif key == 'TargetTCPSpeed':
                             state[key] = np.zeros(6, dtype=np.float64)
                         elif key == 'TargetQ':
@@ -621,11 +675,17 @@ class RealmanInterpolationController(mp.Process):
                 # First loop successful, ready to receive command
                 if iter_idx == 0:
                     self.ready_event.set()
-                iter_idx += 1
 
-                if self.verbose:
-                    actual_dt = time.perf_counter() - t_start
-                    print(f"[RealmanPositionalController] Actual frequency {1/actual_dt:.1f} Hz")
+                # Frequency logging: collect samples, print stats every ~1s
+                actual_dt = time.perf_counter() - t_start
+                freq_samples.append(actual_dt)
+                if len(freq_samples) >= freq_log_interval:
+                    dts = np.array(freq_samples)
+                    freqs = 1.0 / dts
+                    print(f"[CANFD loop] freq: mean={freqs.mean():.1f} min={freqs.min():.1f} max={freqs.max():.1f} std={freqs.std():.1f} Hz")
+                    freq_samples.clear()
+
+                iter_idx += 1
 
         finally:
             # Mandatory cleanup
