@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 from einops import rearrange, reduce
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
@@ -36,6 +37,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
             cond_predict_scale=True,
             obs_encoder_group_norm=False,
             eval_fixed_crop=False,
+            transforms=None,
             # parameters passed to step
             **kwargs):
         super().__init__()
@@ -162,6 +164,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
         self.n_action_steps = n_action_steps
         self.n_obs_steps = n_obs_steps
         self.obs_as_global_cond = obs_as_global_cond
+        self.transforms = None if transforms is None else torch.nn.Sequential(*transforms)
         self.kwargs = kwargs
 
         if num_inference_steps is None:
@@ -187,7 +190,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
             dtype=condition_data.dtype,
             device=condition_data.device,
             generator=generator)
-    
+
         # set step values
         scheduler.set_timesteps(self.num_inference_steps)
 
@@ -247,7 +250,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
             # condition through impainting
             this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
             nobs_features = self.obs_encoder(this_nobs)
-            # reshape back to B, To, Do
+            # reshape back to B, T, Do
             nobs_features = nobs_features.reshape(B, To, -1)
             cond_data = torch.zeros(size=(B, T, Da+Do), device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
@@ -284,6 +287,14 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
     def compute_loss(self, batch):
         # normalize input
         assert 'valid_mask' not in batch
+
+        # image augmentation
+        if self.transforms is not None:
+            for key, val in batch['obs'].items():
+                if key.startswith('camera'):
+                    raw_shape = val.shape
+                    batch['obs'][key] = self.transforms(val.reshape(-1, *raw_shape[2:])).reshape(raw_shape)
+        
         nobs = self.normalizer.normalize(batch['obs'])
         nactions = self.normalizer['action'].normalize(batch['action'])
         batch_size = nactions.shape[0]
@@ -331,7 +342,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
 
         # apply conditioning
         noisy_trajectory[condition_mask] = cond_data[condition_mask]
-        
+
         # Predict the noise residual
         pred = self.model(noisy_trajectory, timesteps, 
             local_cond=local_cond, global_cond=global_cond)

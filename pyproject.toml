@@ -42,6 +42,8 @@ dependencies = [
     "pytorchvideo==0.1.5",
     "atomics==1.0.2",
     "r3m @ https://github.com/facebookresearch/r3m/archive/b2334e726887fa0206962d7984c69c5fb09cceab.tar.gz",
+    "timm==0.9.7",
+    "setuptools<71",
     # 平台相关
     "opencv-python==4.6.0.66; sys_platform == 'darwin'",
     "gymnasium>=0.28,<0.30; sys_platform == 'darwin'",

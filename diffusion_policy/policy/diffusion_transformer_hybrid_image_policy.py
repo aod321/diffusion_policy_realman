@@ -43,6 +43,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             time_as_cond=True,
             obs_as_cond=True,
             pred_action_steps_only=False,
+            transforms=None,
             # parameters passed to step
             **kwargs):
         super().__init__()
@@ -174,6 +175,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         self.n_obs_steps = n_obs_steps
         self.obs_as_cond = obs_as_cond
         self.pred_action_steps_only = pred_action_steps_only
+        self.transforms = None if transforms is None else torch.nn.Sequential(*transforms)
         self.kwargs = kwargs
 
         if num_inference_steps is None:
@@ -256,8 +258,8 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             # condition through impainting
             this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
             nobs_features = self.obs_encoder(this_nobs)
-            # reshape back to B, To, Do
-            nobs_features = nobs_features.reshape(B, To, -1)
+            # reshape back to B, T, Do
+            nobs_features = nobs_features.reshape(B, T, -1)
             shape = (B, T, Da+Do)
             cond_data = torch.zeros(size=shape, device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
@@ -314,6 +316,13 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
     def compute_loss(self, batch):
         # normalize input
         assert 'valid_mask' not in batch
+        # image augmentation
+        if self.transforms is not None:
+            for key, val in batch['obs'].items():
+                if key.startswith('camera'):
+                    raw_shape = val.shape
+                    batch['obs'][key] = self.transforms(val.reshape(-1, *raw_shape[2:])).reshape(raw_shape)
+
         nobs = self.normalizer.normalize(batch['obs'])
         nactions = self.normalizer['action'].normalize(batch['action'])
         batch_size = nactions.shape[0]

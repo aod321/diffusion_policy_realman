@@ -27,6 +27,7 @@ class DiffusionUnetImagePolicy(BaseImagePolicy):
             kernel_size=5,
             n_groups=8,
             cond_predict_scale=True,
+            input_pertub=0.1,
             # parameters passed to step
             **kwargs):
         super().__init__()
@@ -73,6 +74,7 @@ class DiffusionUnetImagePolicy(BaseImagePolicy):
         self.n_action_steps = n_action_steps
         self.n_obs_steps = n_obs_steps
         self.obs_as_global_cond = obs_as_global_cond
+        self.input_pertub = input_pertub
         self.kwargs = kwargs
 
         if num_inference_steps is None:
@@ -223,16 +225,19 @@ class DiffusionUnetImagePolicy(BaseImagePolicy):
 
         # Sample noise that we'll add to the images
         noise = torch.randn(trajectory.shape, device=trajectory.device)
-        bsz = trajectory.shape[0]
+        # input perturbation by adding additonal noise to alleviate exposure bias
+        # reference: https://github.com/forever208/DDPM-IP
+        noise_new = noise + self.input_pertub * torch.randn(trajectory.shape, device=trajectory.device)
+
         # Sample a random timestep for each image
         timesteps = torch.randint(
             0, self.noise_scheduler.config.num_train_timesteps, 
-            (bsz,), device=trajectory.device
+            (trajectory.shape[0],), device=trajectory.device
         ).long()
         # Add noise to the clean images according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
         noisy_trajectory = self.noise_scheduler.add_noise(
-            trajectory, noise, timesteps)
+            trajectory, noise_new, timesteps)
         
         # compute loss mask
         loss_mask = ~condition_mask

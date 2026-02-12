@@ -12,6 +12,18 @@ class SharedMemoryQueue:
     A Lock-Free FIFO Shared Memory Data Structure.
     Stores a sequence of dict of numpy arrays.
     """
+    class CallbackGuard:
+        def __init__(self, callback, data):
+            self.callback = callback
+            self.data = data
+        
+        def __enter__(self):
+            return self.data
+        
+        def __exit__(self, type, value, traceback):
+            self.callback()
+            del self.data
+            del self.callback
 
     def __init__(self,
             shm_manager: SharedMemoryManager,
@@ -126,6 +138,68 @@ class SharedMemoryQueue:
         # update idx
         self.read_counter.add(1)
         return out
+    
+    def get_next_view(self) -> Dict[str, np.ndarray]:
+        """
+        Get reference to the next element to write
+        for zero-copy writing
+        """
+        read_count = self.read_counter.load()
+        write_count = self.write_counter.load()
+        n_data = write_count - read_count
+        if n_data >= self.buffer_size:
+            raise Full()
+        
+        next_idx = write_count % self.buffer_size
+        out = dict()
+        for key, value in self.shared_arrays.items():
+            arr = value.get()
+            out[key] = arr[next_idx]
+
+        return out
+
+    def put_next_view(self, data: Dict[str, Union[np.ndarray, numbers.Number]]):
+        """
+        Used in conjunction with get_next_view
+        for zero-copy writing
+        """
+        read_count = self.read_counter.load()
+        write_count = self.write_counter.load()
+        n_data = write_count - read_count
+        if n_data >= self.buffer_size:
+            raise Full()
+        
+        next_idx = write_count % self.buffer_size
+        # write to shared memory
+        for key, value in data.items():
+            arr: np.ndarray
+            arr = self.shared_arrays[key].get()
+            if isinstance(value, np.ndarray):
+                # assumed already written to the array
+                pass
+            else:
+                arr[next_idx] = np.array(value, dtype=arr.dtype)
+
+        # update idx
+        self.write_counter.add(1)
+
+    
+    def get_view(self) -> CallbackGuard:
+        write_count = self.write_counter.load()
+        read_count = self.read_counter.load()
+        n_data = write_count - read_count
+        if n_data <= 0:
+            raise Empty()
+        
+        next_idx = read_count % self.buffer_size
+        data = dict()
+        for key, value in self.shared_arrays.items():
+            arr = value.get()
+            data[key] = arr[next_idx]
+        
+        return self.CallbackGuard(
+            callback=lambda: self.read_counter.add(1),
+            data=data)
 
     def get_k(self, k, out=None) -> Dict[str, np.ndarray]:
         write_count = self.write_counter.load()
