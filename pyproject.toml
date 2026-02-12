@@ -49,12 +49,12 @@ dependencies = [
     "gymnasium>=0.28,<0.30; sys_platform == 'darwin'",
     "shapely==1.8.4; sys_platform == 'darwin'",
     "ray[default,tune]==2.2.0; sys_platform == 'darwin'",
-    "imagecodecs==2023.9.18; sys_platform == 'darwin'",
-    "imagecodecs==2022.8.8; sys_platform == 'linux'",
+    "imagecodecs==2023.9.18",
 ]
 
 [tool.uv]
 build-constraint-dependencies = [
     "cython<3",
     "setuptools<58",
+    "numpy<2",
 ]
