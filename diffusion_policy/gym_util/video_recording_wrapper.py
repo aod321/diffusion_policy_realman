@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import numpy as np
 from diffusion_policy.real_world.video_recorder import VideoRecorder
 

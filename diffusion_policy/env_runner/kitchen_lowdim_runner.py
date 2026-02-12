@@ -8,8 +8,8 @@ import dill
 import math
 import logging
 import wandb.sdk.data_types.video as wv
-import gym
-import gym.spaces
+import gymnasium as gym
+import gymnasium.spaces
 import multiprocessing as mp
 from diffusion_policy.gym_util.async_vector_env import AsyncVectorEnv
 from diffusion_policy.gym_util.sync_vector_env import SyncVectorEnv

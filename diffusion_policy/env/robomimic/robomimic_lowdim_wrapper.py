@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional
 import numpy as np
-import gym
-from gym.spaces import Box
+import gymnasium as gym
+from gymnasium.spaces import Box
 from robomimic.envs.env_robosuite import EnvRobosuite
 
 class RobomimicLowdimWrapper(gym.Env):

@@ -18,7 +18,7 @@ import importlib
 import inspect
 import os
 
-from gym.envs.registration import registry as gym_registry
+from gymnasium.envs.registration import registry as gym_registry
 
 
 def import_class_from_path(class_path):

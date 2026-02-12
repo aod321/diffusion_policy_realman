@@ -36,14 +36,15 @@ from diffusion_policy.real_world.keystroke_counter import (
 @click.option('--init_joints', '-j', is_flag=True, default=False, help="Whether to initialize robot joint configuration in the beginning.")
 @click.option('--frequency', '-f', default=10, type=float, help="Control frequency in Hz.")
 @click.option('--command_latency', '-cl', default=0.01, type=float, help="Latency between receiving SapceMouse command to executing on Robot in Sec.")
-def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_latency):
+@click.option('--robot_type', '-rt', default='ur5', type=click.Choice(['ur5', 'realman']), help="Robot type: ur5 or realman.")
+def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_latency, robot_type):
     dt = 1/frequency
     with SharedMemoryManager() as shm_manager:
         with KeystrokeCounter() as key_counter, \
             Spacemouse(shm_manager=shm_manager) as sm, \
             RealEnv(
-                output_dir=output, 
-                robot_ip=robot_ip, 
+                output_dir=output,
+                robot_ip=robot_ip,
                 # recording resolution
                 obs_image_resolution=(1280,720),
                 frequency=frequency,
@@ -54,7 +55,8 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
                 thread_per_video=3,
                 # video recording quality, lower is better (but slower).
                 video_crf=21,
-                shm_manager=shm_manager
+                shm_manager=shm_manager,
+                robot_type=robot_type
             ) as env:
             cv2.setNumThreads(1)
 

@@ -6,7 +6,7 @@ sys.path.append(ROOT_DIR)
 os.chdir(ROOT_DIR)
 
 from diffusion_policy.env.block_pushing.block_pushing_multimodal import BlockPushMultimodal
-from gym.wrappers import FlattenObservation
+from gymnasium.wrappers import FlattenObservation
 from diffusion_policy.gym_util.multistep_wrapper import MultiStepWrapper
 from diffusion_policy.gym_util.video_wrapper import VideoWrapper
 

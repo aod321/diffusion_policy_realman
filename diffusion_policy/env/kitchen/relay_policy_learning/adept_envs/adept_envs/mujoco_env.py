@@ -22,9 +22,9 @@ import os
 import time
 from typing import Dict, Optional
 
-import gym
-from gym import spaces
-from gym.utils import seeding
+import gymnasium as gym
+from gymnasium import spaces
+from gymnasium.utils import seeding
 import numpy as np
 
 from adept_envs.simulation.sim_robot import MujocoSimRobot, RenderMode

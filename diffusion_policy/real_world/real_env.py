@@ -5,7 +5,6 @@ import time
 import shutil
 import math
 from multiprocessing.managers import SharedMemoryManager
-from diffusion_policy.real_world.rtde_interpolation_controller import RTDEInterpolationController
 from diffusion_policy.real_world.multi_realsense import MultiRealsense, SingleRealsense
 from diffusion_policy.real_world.video_recorder import VideoRecorder
 from diffusion_policy.common.timestamp_accumulator import (
@@ -30,7 +29,7 @@ DEFAULT_OBS_KEY_MAP = {
 }
 
 class RealEnv:
-    def __init__(self, 
+    def __init__(self,
             # required params
             output_dir,
             robot_ip,
@@ -49,6 +48,14 @@ class RealEnv:
             # robot
             tcp_offset=0.13,
             init_joints=False,
+            # robot type
+            robot_type='ur5',  # 'ur5' or 'realman'
+            # Realman-specific params
+            realman_tcp_port=8080,
+            realman_udp_port=8089,
+            realman_udp_cycle=2,
+            realman_num_joints=7,
+            realman_host_ip='0.0.0.0',
             # video capture params
             video_capture_fps=30,
             video_capture_resolution=(1280,720),
@@ -151,28 +158,60 @@ class RealEnv:
             )
 
         cube_diag = np.linalg.norm([1,1,1])
-        j_init = np.array([0,-90,-90,-90,90,0]) / 180 * np.pi
-        if not init_joints:
-            j_init = None
 
-        robot = RTDEInterpolationController(
-            shm_manager=shm_manager,
-            robot_ip=robot_ip,
-            frequency=125, # UR5 CB3 RTDE
-            lookahead_time=0.1,
-            gain=300,
-            max_pos_speed=max_pos_speed*cube_diag,
-            max_rot_speed=max_rot_speed*cube_diag,
-            launch_timeout=3,
-            tcp_offset_pose=[0,0,tcp_offset,0,0,0],
-            payload_mass=None,
-            payload_cog=None,
-            joints_init=j_init,
-            joints_init_speed=1.05,
-            soft_real_time=False,
-            verbose=False,
-            receive_keys=None,
-            get_max_k=max_obs_buffer_size
+        assert robot_type in ('ur5', 'realman'), f"Unknown robot_type: {robot_type}"
+
+        if robot_type == 'ur5':
+            from diffusion_policy.real_world.rtde_interpolation_controller import RTDEInterpolationController
+            j_init = np.array([0,-90,-90,-90,90,0]) / 180 * np.pi
+            if not init_joints:
+                j_init = None
+
+            robot = RTDEInterpolationController(
+                shm_manager=shm_manager,
+                robot_ip=robot_ip,
+                frequency=125, # UR5 CB3 RTDE
+                lookahead_time=0.1,
+                gain=300,
+                max_pos_speed=max_pos_speed*cube_diag,
+                max_rot_speed=max_rot_speed*cube_diag,
+                launch_timeout=3,
+                tcp_offset_pose=[0,0,tcp_offset,0,0,0],
+                payload_mass=None,
+                payload_cog=None,
+                joints_init=j_init,
+                joints_init_speed=1.05,
+                soft_real_time=False,
+                verbose=False,
+                receive_keys=None,
+                get_max_k=max_obs_buffer_size
+            )
+        elif robot_type == 'realman':
+            from diffusion_policy.real_world.realman_interpolation_controller import RealmanInterpolationController
+            j_init = None
+            if init_joints:
+                # Default init joints for 7-DOF Realman arm (radians)
+                # Users should override via joints_init parameter
+                j_init = np.zeros(realman_num_joints)
+
+            robot = RealmanInterpolationController(
+                shm_manager=shm_manager,
+                robot_ip=robot_ip,
+                frequency=100,  # 10ms cycle for movep_canfd
+                max_pos_speed=max_pos_speed*cube_diag,
+                max_rot_speed=max_rot_speed*cube_diag,
+                launch_timeout=10,
+                joints_init=j_init,
+                joints_init_speed=20,
+                soft_real_time=False,
+                verbose=False,
+                receive_keys=None,
+                get_max_k=max_obs_buffer_size,
+                tcp_port=realman_tcp_port,
+                udp_port=realman_udp_port,
+                udp_cycle=realman_udp_cycle,
+                num_joints=realman_num_joints,
+                host_ip=realman_host_ip,
             )
         self.realsense = realsense
         self.robot = robot

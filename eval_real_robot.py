@@ -59,10 +59,11 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 @click.option('--max_duration', '-md', default=60, help='Max duration for each epoch in seconds.')
 @click.option('--frequency', '-f', default=10, type=float, help="Control frequency in Hz.")
 @click.option('--command_latency', '-cl', default=0.01, type=float, help="Latency between receiving SapceMouse command to executing on Robot in Sec.")
+@click.option('--robot_type', '-rt', default='ur5', type=click.Choice(['ur5', 'realman']), help="Robot type: ur5 or realman.")
 def main(input, output, robot_ip, match_dataset, match_episode,
-    vis_camera_idx, init_joints, 
+    vis_camera_idx, init_joints,
     steps_per_inference, max_duration,
-    frequency, command_latency):
+    frequency, command_latency, robot_type):
     # load match_dataset
     match_camera_idx = 0
     episode_first_frame_map = dict()
@@ -142,8 +143,8 @@ def main(input, output, robot_ip, match_dataset, match_episode,
 
     with SharedMemoryManager() as shm_manager:
         with Spacemouse(shm_manager=shm_manager) as sm, RealEnv(
-            output_dir=output, 
-            robot_ip=robot_ip, 
+            output_dir=output,
+            robot_ip=robot_ip,
             frequency=frequency,
             n_obs_steps=n_obs_steps,
             obs_image_resolution=obs_res,
@@ -155,7 +156,8 @@ def main(input, output, robot_ip, match_dataset, match_episode,
             thread_per_video=3,
             # video recording quality, lower is better (but slower).
             video_crf=21,
-            shm_manager=shm_manager) as env:
+            shm_manager=shm_manager,
+            robot_type=robot_type) as env:
             cv2.setNumThreads(1)
 
             # Should be the same as demo

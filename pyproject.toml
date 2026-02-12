@@ -1,0 +1,58 @@
+[project]
+name = "diffusion-policy"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "==3.9.*"
+dependencies = [
+    # 跨平台通用的
+    "numpy==1.23.3",
+    "numba==0.56.4",
+    "scipy==1.9.1",
+    "cffi==1.15.1",
+    "ipykernel==6.16",
+    "matplotlib==3.6.1",
+    "zarr==2.12.0",
+    "numcodecs==0.12.1",
+    "h5py==3.7.0",
+    "hydra-core==1.2.0",
+    "einops==0.4.1",
+    "tqdm==4.64.1",
+    "dill==0.3.5.1",
+    "scikit-video==1.1.11",
+    "scikit-image==0.19.3",
+    "pymunk==6.2.1",
+    "wandb==0.13.3",
+    "threadpoolctl==3.1.0",
+    "cython==0.29.32",
+    "imageio==2.22.0",
+    "imageio-ffmpeg==0.4.7",
+    "termcolor==2.0.1",
+    "tensorboard==2.10.1",
+    "tensorboardx==2.5.1",
+    "psutil==5.9.2",
+    "click==8.0.4",
+    "boto3==1.24.96",
+    "accelerate==0.13.2",
+    "datasets==2.6.1",
+    "diffusers==0.11.1",
+    "av>=10.0.0",
+    "pygame==2.1.2",
+    "robomimic==0.2.0; sys_platform == 'linux'",
+    "pytorchvideo==0.1.5",
+    "atomics==1.0.2",
+    "r3m @ https://github.com/facebookresearch/r3m/archive/b2334e726887fa0206962d7984c69c5fb09cceab.tar.gz",
+    # 平台相关
+    "opencv-python==4.6.0.66; sys_platform == 'darwin'",
+    "gymnasium>=0.28,<0.30; sys_platform == 'darwin'",
+    "shapely==1.8.4; sys_platform == 'darwin'",
+    "ray[default,tune]==2.2.0; sys_platform == 'darwin'",
+    "imagecodecs==2023.9.18; sys_platform == 'darwin'",
+    "imagecodecs==2022.8.8; sys_platform == 'linux'",
+]
+
+[tool.uv]
+build-constraint-dependencies = [
+    "cython<3",
+    "setuptools<58",
+]

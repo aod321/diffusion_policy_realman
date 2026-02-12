@@ -22,8 +22,8 @@ from typing import Dict, List, Optional, Union
 import copy
 import time
 
-from gym import spaces
-from gym.envs import registration
+from gymnasium import spaces
+from gymnasium.envs import registration
 from diffusion_policy.env.block_pushing import block_pushing
 from diffusion_policy.env.block_pushing.utils import utils_pybullet
 from diffusion_policy.env.block_pushing.utils.pose3d import Pose3d

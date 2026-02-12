@@ -23,7 +23,7 @@ from mjrl.utils.gym_env import GymEnv
 import adept_envs
 import time as timer
 import skvideo.io
-import gym
+import gymnasium as gym
 
 # headless renderer
 render_buffer = []  # rendering buffer

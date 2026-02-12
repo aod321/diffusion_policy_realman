@@ -21,9 +21,9 @@ import math
 import time
 from typing import Dict, List, Optional, Tuple, Union
 
-import gym
-from gym import spaces
-from gym.envs import registration
+import gymnasium as gym
+from gymnasium import spaces
+from gymnasium.envs import registration
 from diffusion_policy.env.block_pushing.utils import utils_pybullet
 from diffusion_policy.env.block_pushing.utils import xarm_sim_robot
 from diffusion_policy.env.block_pushing.utils.pose3d import Pose3d
