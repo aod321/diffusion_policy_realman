@@ -6,16 +6,23 @@ class KeystrokeCounter(Listener):
     def __init__(self):
         self.key_count_map = defaultdict(lambda:0)
         self.key_press_list = list()
+        self._keys_held = set()
         self.lock = Lock()
         super().__init__(on_press=self.on_press, on_release=self.on_release)
-    
+
     def on_press(self, key):
         with self.lock:
             self.key_count_map[key] += 1
             self.key_press_list.append(key)
-    
+            self._keys_held.add(key)
+
     def on_release(self, key):
-        pass
+        with self.lock:
+            self._keys_held.discard(key)
+
+    def is_key_held(self, key):
+        with self.lock:
+            return key in self._keys_held
     
     def clear(self):
         with self.lock:
