@@ -16,18 +16,15 @@ Pipeline:
 """
 
 import argparse
+import json
+import os
 import time
 from multiprocessing.managers import SharedMemoryManager
+from typing import Tuple
 
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
-from diffusion_policy.real_world.realman_interpolation_controller import (
-    RealmanInterpolationController,
-)
-from diffusion_policy.real_world.keystroke_counter import (
-    KeystrokeCounter, Key, KeyCode,
-)
 from diffusion_policy.common.precise_sleep import precise_wait
 
 # ─── Coordinate remap presets ────────────────────────────────────────────────
@@ -150,12 +147,12 @@ def print_trajectory_info(stats, label="Trajectory"):
     print(f"  End pos:      {stats['end_pos']}")
     print(f"{'='*50}\n")
 
-# ─── Main ────────────────────────────────────────────────────────────────────
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Replay recorded iPhone trajectory on Realman robot")
-    parser.add_argument("trajectory", help="Path to .npy trajectory from tcp_server.py")
+def add_replay_arguments(
+        parser: argparse.ArgumentParser,
+        include_trajectory_argument: bool = True) -> argparse.ArgumentParser:
+    """Attach standard replay CLI arguments and return parser."""
+    if include_trajectory_argument:
+        parser.add_argument("trajectory", help="Path to .npy trajectory from tcp_server.py")
     parser.add_argument("--robot_ip", "-ri", required=True, help="Realman robot IP")
     parser.add_argument("--frequency", "-f", type=float, default=10.0,
                         help="Control loop frequency Hz (default: 10)")
@@ -176,14 +173,27 @@ def main():
                         help="Command-side smoothing seconds (default: 0)")
     parser.add_argument("--pos_only", action="store_true",
                         help="Replay position only, lock rotation at anchor")
+    parser.add_argument("--log_replay", type=str, default=None,
+                        help="Save replay target/actual trajectory log to .npz")
+    parser.add_argument("--log_actual_hz", type=float, default=20.0,
+                        help="Actual pose sampling rate for replay log (default: 20)")
+    return parser
 
-    args = parser.parse_args()
+
+def preprocess_trajectory_for_replay(
+        timestamps: np.ndarray,
+        transforms: np.ndarray,
+        args: argparse.Namespace) -> Tuple[np.ndarray, np.ndarray, float, dict]:
+    """Normalize/remap/resample trajectory before replay."""
     target_hz = args.target_hz or args.frequency
-    np.set_printoptions(precision=4, suppress=True)
+    timestamps = np.asarray(timestamps, dtype=np.float64)
+    transforms = np.asarray(transforms, dtype=np.float64)
 
-    # ── 1. Load ──────────────────────────────────────────────────────────
-    print(f"Loading: {args.trajectory}")
-    timestamps, transforms = load_trajectory(args.trajectory)
+    if len(timestamps) < 2:
+        raise ValueError("Need at least 2 trajectory samples for replay")
+    if transforms.ndim != 3 or transforms.shape[1:] != (4, 4):
+        raise ValueError(f"Expected transforms shape (N,4,4), got {transforms.shape}")
+
     print(f"  Raw: {len(timestamps)} frames, "
           f"duration={timestamps[-1] - timestamps[0]:.2f}s")
 
@@ -217,19 +227,67 @@ def main():
     stats = compute_trajectory_stats(timestamps, transforms)
     print_trajectory_info(stats, label=f"Final trajectory ({args.remap})")
 
-    if stats["max_velocity"] > args.max_velocity:
-        print(f"WARNING: Max velocity {stats['max_velocity']:.4f} m/s "
-              f"exceeds limit {args.max_velocity} m/s!")
-        resp = input("Continue anyway? [y/N] ").strip().lower()
-        if resp != 'y':
-            print("Aborted.")
-            return
+    return timestamps, transforms, target_hz, stats
 
-    if args.dry_run:
-        print("--dry_run: exiting without robot connection.")
-        return
 
-    # ── 8. Connect robot & execute ───────────────────────────────────────
+def confirm_velocity_safety(stats: dict, max_velocity: float) -> bool:
+    """Return True if safe to continue (possibly after user confirmation)."""
+    if stats["max_velocity"] <= max_velocity:
+        return True
+    print(f"WARNING: Max velocity {stats['max_velocity']:.4f} m/s "
+          f"exceeds limit {max_velocity} m/s!")
+    resp = input("Continue anyway? [y/N] ").strip().lower()
+    return resp == 'y'
+
+
+def save_replay_log(
+        path: str,
+        target_times_wall: np.ndarray,
+        target_poses: np.ndarray,
+        actual_times_wall: np.ndarray,
+        actual_poses: np.ndarray,
+        metadata: dict) -> None:
+    """Persist replay traces for offline error analysis."""
+    out_path = os.path.abspath(path)
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    if len(target_times_wall) == 0:
+        raise ValueError("target_times_wall is empty")
+    t0 = float(target_times_wall[0])
+    target_times = np.asarray(target_times_wall, dtype=np.float64)
+    actual_times = np.asarray(actual_times_wall, dtype=np.float64)
+    target_poses = np.asarray(target_poses, dtype=np.float64)
+    actual_poses = np.asarray(actual_poses, dtype=np.float64).reshape(-1, 6)
+
+    np.savez_compressed(
+        out_path,
+        target_times_wall=target_times,
+        target_times=target_times - t0,
+        target_poses=target_poses,
+        actual_times_wall=actual_times,
+        actual_times=actual_times - t0,
+        actual_poses=actual_poses,
+        metadata_json=np.array(json.dumps(metadata)),
+    )
+    print(f"Saved replay log: {out_path}")
+
+
+def execute_replay(
+        timestamps: np.ndarray,
+        transforms: np.ndarray,
+        args: argparse.Namespace,
+        target_hz: float) -> None:
+    """Execute processed trajectory on Realman robot."""
+    from diffusion_policy.real_world.realman_interpolation_controller import (
+        RealmanInterpolationController,
+    )
+    from diffusion_policy.real_world.keystroke_counter import (
+        KeystrokeCounter,
+        KeyCode,
+    )
+
     print(f"Connecting to robot at {args.robot_ip} ...")
 
     with SharedMemoryManager() as shm_manager:
@@ -257,6 +315,7 @@ def main():
                 mat_to_pose(T_anchor @ transforms[i])
                 for i in range(len(transforms))
             ]
+            absolute_targets = np.asarray(absolute_targets, dtype=np.float64)
 
             print(f"\nStarting replay: {len(absolute_targets)} waypoints, "
                   f"{timestamps[-1]:.2f}s")
@@ -264,7 +323,34 @@ def main():
 
             with KeystrokeCounter() as key_counter:
                 t_start = time.time() + 0.5  # 500ms lead time
+                target_times_wall = t_start + timestamps
                 stop = False
+                scheduled_count = 0
+
+                log_enabled = args.log_replay is not None
+                log_interval = 0.0
+                if log_enabled:
+                    if args.log_actual_hz <= 0:
+                        raise ValueError("--log_actual_hz must be > 0 when --log_replay is enabled")
+                    log_interval = 1.0 / args.log_actual_hz
+                next_log_time = -np.inf
+                actual_times_wall = []
+                actual_poses = []
+
+                def maybe_log_actual(now: float, force: bool = False):
+                    nonlocal next_log_time
+                    if not log_enabled:
+                        return None
+                    if not force and now < next_log_time:
+                        return None
+                    cur_state = robot.get_state()
+                    cur_pose = np.asarray(cur_state['ActualTCPPose'], dtype=np.float64)
+                    actual_times_wall.append(now)
+                    actual_poses.append(cur_pose.copy())
+                    next_log_time = now + log_interval
+                    return cur_pose
+
+                maybe_log_actual(time.time(), force=True)
 
                 for i, pose in enumerate(absolute_targets):
                     # Check keyboard
@@ -278,6 +364,7 @@ def main():
 
                     t_target = t_start + timestamps[i]
                     now = time.time()
+                    sampled_pose = maybe_log_actual(now, force=False)
 
                     # Skip waypoints already in the past
                     if t_target > now:
@@ -285,13 +372,17 @@ def main():
                             pose=np.array(pose),
                             target_time=t_target,
                         )
+                        scheduled_count += 1
 
                     # Progress printout (~1 Hz)
                     if i % max(1, int(target_hz / args.speed_scale)) == 0 or i == len(absolute_targets) - 1:
                         pct = 100.0 * i / max(1, len(absolute_targets) - 1)
                         elapsed = now - t_start
-                        cur_state = robot.get_state()
-                        cur_pos = cur_state['ActualTCPPose'][:3]
+                        if sampled_pose is None:
+                            cur_state = robot.get_state()
+                            cur_pos = cur_state['ActualTCPPose'][:3]
+                        else:
+                            cur_pos = sampled_pose[:3]
                         tgt_pos = pose[:3]
                         pos_err = np.linalg.norm(cur_pos - tgt_pos) * 1000
                         print(f"  [{pct:5.1f}%] t={elapsed:.1f}/{timestamps[-1]:.1f}s  "
@@ -302,11 +393,93 @@ def main():
 
                 if not stop:
                     # Wait for the last waypoint to be reached
-                    remaining = t_start + timestamps[-1] - time.time() + 0.5
-                    if remaining > 0:
-                        time.sleep(remaining)
+                    t_end = t_start + timestamps[-1] + 0.5
+                    if log_enabled:
+                        while True:
+                            now = time.time()
+                            if now >= t_end:
+                                break
+                            maybe_log_actual(now, force=False)
+                            sleep_dt = min(log_interval, max(0.0, t_end - now))
+                            time.sleep(max(0.001, sleep_dt))
+                    else:
+                        remaining = t_end - time.time()
+                        if remaining > 0:
+                            time.sleep(remaining)
                     print("\nReplay complete.")
+                maybe_log_actual(time.time(), force=True)
+
+                if log_enabled:
+                    save_replay_log(
+                        path=args.log_replay,
+                        target_times_wall=target_times_wall,
+                        target_poses=absolute_targets,
+                        actual_times_wall=np.asarray(actual_times_wall, dtype=np.float64),
+                        actual_poses=np.asarray(actual_poses, dtype=np.float64),
+                        metadata={
+                            "robot_ip": args.robot_ip,
+                            "remap": args.remap,
+                            "target_hz": float(target_hz),
+                            "speed_scale": float(args.speed_scale),
+                            "max_velocity": float(args.max_velocity),
+                            "follow": bool(args.follow),
+                            "lookahead": float(args.lookahead),
+                            "scheduled_count": int(scheduled_count),
+                            "total_targets": int(len(absolute_targets)),
+                            "stopped_by_user": bool(stop),
+                        },
+                    )
                 # Robot cleanup handled by context manager
+
+
+def replay_from_transforms(
+        timestamps: np.ndarray,
+        transforms: np.ndarray,
+        args: argparse.Namespace) -> dict:
+    """Run full replay pipeline from in-memory trajectory arrays."""
+    np.set_printoptions(precision=4, suppress=True)
+    timestamps, transforms, target_hz, stats = preprocess_trajectory_for_replay(
+        timestamps=timestamps,
+        transforms=transforms,
+        args=args,
+    )
+
+    if not confirm_velocity_safety(stats, args.max_velocity):
+        print("Aborted.")
+        return stats
+
+    if args.dry_run:
+        if args.log_replay is not None:
+            print("--log_replay is ignored in --dry_run mode (no actual robot trajectory).")
+        print("--dry_run: exiting without robot connection.")
+        return stats
+
+    execute_replay(
+        timestamps=timestamps,
+        transforms=transforms,
+        args=args,
+        target_hz=target_hz,
+    )
+    return stats
+
+
+# ─── Main ────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Replay recorded iPhone trajectory on Realman robot")
+    add_replay_arguments(parser, include_trajectory_argument=True)
+
+    args = parser.parse_args()
+
+    # ── 1. Load ──────────────────────────────────────────────────────────
+    print(f"Loading: {args.trajectory}")
+    timestamps, transforms = load_trajectory(args.trajectory)
+    replay_from_transforms(
+        timestamps=timestamps,
+        transforms=transforms,
+        args=args,
+    )
 
 
 if __name__ == '__main__':
