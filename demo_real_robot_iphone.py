@@ -35,6 +35,59 @@ from diffusion_policy.real_world.keystroke_counter import (
     KeystrokeCounter, Key, KeyCode
 )
 
+
+def discover_iphone_teleop_bridge(timeout: float = 5.0):
+    """Discover node_iphone.py teleop bridge via mDNS.
+
+    Returns (host_ip, zmq_port) or None if not found.
+    """
+    try:
+        from zeroconf import ServiceBrowser, Zeroconf
+    except ImportError:
+        return None
+
+    SERVICE_TYPE = "_iphoneTeleop._tcp.local."
+    result = {}
+
+    class Listener:
+        def add_service(self, zc, type_, name):
+            info = zc.get_service_info(type_, name)
+            if info is None:
+                return
+            addresses = info.parsed_scoped_addresses()
+            if not addresses:
+                return
+            host = addresses[0]
+            zmq_port = None
+            if info.properties:
+                zmq_port_bytes = info.properties.get(b"zmq_port")
+                if zmq_port_bytes:
+                    zmq_port = int(zmq_port_bytes.decode())
+            result["host"] = host
+            result["zmq_port"] = zmq_port or 5556
+
+        def remove_service(self, zc, type_, name):
+            pass
+
+        def update_service(self, zc, type_, name):
+            pass
+
+    zc = Zeroconf()
+    listener = Listener()
+    browser = ServiceBrowser(zc, SERVICE_TYPE, listener)
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if "host" in result:
+            break
+        time.sleep(0.1)
+
+    zc.close()
+
+    if "host" not in result:
+        return None
+    return result["host"], result["zmq_port"]
+
 @click.command()
 @click.option('--output', '-o', required=True, help="Directory to save demonstration dataset.")
 @click.option('--robot_ip', '-ri', required=True, help="Robot IP address e.g. 192.168.0.204")
@@ -52,9 +105,11 @@ from diffusion_policy.real_world.keystroke_counter import (
 @click.option('--rot_deadzone', default=0.01, type=float, help="Rotation deadzone in radians (default ~0.6 deg).")
 @click.option('--filter_tau', default=0.05, type=float, help="EMA filter time constant in seconds (default 50ms, 0=off).")
 @click.option('--zmq', default=None, type=str, help="ZMQ endpoint of node_iphone.py (e.g. tcp://localhost:5556). If set, uses ZMQ instead of direct TCP.")
+@click.option('--no_discover', is_flag=True, default=False, help="Skip mDNS discovery, use direct TCP receiver.")
+@click.option('--discover_timeout', default=5.0, type=float, help="mDNS discovery timeout in seconds (default: 5).")
 def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_latency,
          robot_type, follow, lookahead, iphone_port, pos_scale, rot_scale,
-         deadzone, rot_deadzone, filter_tau, zmq):
+         deadzone, rot_deadzone, filter_tau, zmq, no_discover, discover_timeout):
     if lookahead is None:
         lookahead = 0.1 if follow else 0.0
     dt = 1/frequency
@@ -73,10 +128,27 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
         filter_tau=filter_tau,
     )
     if zmq:
+        # 1) Explicit --zmq endpoint
         from diffusion_policy.real_world.iphone_zmq_receiver import IPhoneZMQReceiver
         iphone_receiver = IPhoneZMQReceiver(zmq_endpoint=zmq, **iphone_kwargs)
+        print(f"Using ZMQ receiver: {zmq}")
+    elif not no_discover:
+        # 2) mDNS auto-discovery
+        print(f"Discovering node_iphone.py via mDNS (timeout={discover_timeout}s)...")
+        discovered = discover_iphone_teleop_bridge(timeout=discover_timeout)
+        if discovered is not None:
+            host, port = discovered
+            endpoint = f"tcp://{host}:{port}"
+            from diffusion_policy.real_world.iphone_zmq_receiver import IPhoneZMQReceiver
+            iphone_receiver = IPhoneZMQReceiver(zmq_endpoint=endpoint, **iphone_kwargs)
+            print(f"Discovered node_iphone.py at {endpoint}")
+        else:
+            print("mDNS discovery failed, falling back to direct TCP receiver.")
+            iphone_receiver = IPhoneARKitReceiver(port=iphone_port, **iphone_kwargs)
     else:
+        # 3) Direct TCP receiver
         iphone_receiver = IPhoneARKitReceiver(port=iphone_port, **iphone_kwargs)
+        print(f"Using direct TCP receiver on port {iphone_port}")
 
     with SharedMemoryManager() as shm_manager:
         with KeystrokeCounter() as key_counter, \
