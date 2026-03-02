@@ -4,7 +4,6 @@ import time
 import pathlib
 from multiprocessing.managers import SharedMemoryManager
 import numpy as np
-import pyrealsense2 as rs
 from diffusion_policy.real_world.single_realsense import SingleRealsense
 from diffusion_policy.real_world.video_recorder import VideoRecorder
 
@@ -166,6 +165,7 @@ class MultiRealsense:
         exposure: (1, 10000) 100us unit. (0.1 ms, 1/10000s)
         gain: (0, 128)
         """
+        import pyrealsense2 as rs
 
         if exposure is None and gain is None:
             # auto exposure
@@ -179,6 +179,8 @@ class MultiRealsense:
                 self.set_color_option(rs.option.gain, gain)
     
     def set_white_balance(self, white_balance=None):
+        import pyrealsense2 as rs
+
         if white_balance is None:
             self.set_color_option(rs.option.enable_auto_white_balance, 1.0)
         else:

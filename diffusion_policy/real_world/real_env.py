@@ -5,14 +5,12 @@ import time
 import shutil
 import math
 from multiprocessing.managers import SharedMemoryManager
-from diffusion_policy.real_world.multi_realsense import MultiRealsense, SingleRealsense
 from diffusion_policy.real_world.video_recorder import VideoRecorder
 from diffusion_policy.common.timestamp_accumulator import (
     TimestampObsAccumulator, 
     TimestampActionAccumulator,
     align_timestamps
 )
-from diffusion_policy.real_world.multi_camera_visualizer import MultiCameraVisualizer
 from diffusion_policy.common.replay_buffer import ReplayBuffer
 from diffusion_policy.common.cv2_util import (
     get_image_transform, optimal_row_cols)
@@ -84,7 +82,12 @@ class RealEnv:
             shm_manager = SharedMemoryManager()
             shm_manager.start()
         if camera_serial_numbers is None:
-            camera_serial_numbers = SingleRealsense.get_connected_devices_serial()
+            try:
+                from diffusion_policy.real_world.multi_realsense import SingleRealsense
+                camera_serial_numbers = SingleRealsense.get_connected_devices_serial()
+            except ImportError:
+                print('pyrealsense2 not installed. Running without RealSense cameras.')
+                camera_serial_numbers = []
 
         n_cameras = len(camera_serial_numbers)
         realsense = None
@@ -134,6 +137,7 @@ class RealEnv:
                 thread_type='FRAME',
                 thread_count=thread_per_video)
 
+            from diffusion_policy.real_world.multi_realsense import MultiRealsense
             realsense = MultiRealsense(
                 serial_numbers=camera_serial_numbers,
                 shm_manager=shm_manager,
@@ -156,6 +160,7 @@ class RealEnv:
                 )
 
             if enable_multi_cam_vis:
+                from diffusion_policy.real_world.multi_camera_visualizer import MultiCameraVisualizer
                 multi_cam_vis = MultiCameraVisualizer(
                     realsense=realsense,
                     row=row,

@@ -155,10 +155,7 @@ def main():
 
     R_remap = REMAP_PRESETS[args.remap]
     use_remap = not np.allclose(R_remap, np.eye(3))
-    if use_remap:
-        R_hom = np.eye(4)
-        R_hom[:3, :3] = R_remap
-        R_hom_inv = np.linalg.inv(R_hom)
+    R_remap_T = R_remap.T
 
     if not args.dry_run:
         from diffusion_policy.real_world.realman_interpolation_controller import (
@@ -284,15 +281,22 @@ def main():
             frame_count += 1
             continue
 
-        # ── 9. Compute relative transform ────────────────────────────
-        T_rel = np.linalg.inv(first_pose_T) @ T_msg
+        # ── 9. World-frame deltas (matches demo_real_robot_iphone.py) ─
+        dp_world = T_msg[:3, 3] - first_pose_T[:3, 3]
+        dR_world = T_msg[:3, :3] @ first_pose_T[:3, :3].T
 
-        # ── 10. Apply remap ──────────────────────────────────────────
+        # ── 10. Remap to robot frame: dp_robot = M @ dp, dR_robot = M @ dR @ M^T
         if use_remap:
-            T_rel = R_hom @ T_rel @ R_hom_inv
+            dp_robot = R_remap @ dp_world
+            dR_robot = R_remap @ dR_world @ R_remap_T
+        else:
+            dp_robot = dp_world
+            dR_robot = dR_world
 
-        # ── 11. Compute absolute target ──────────────────────────────
-        T_abs = anchor_T @ T_rel
+        # ── 11. Compose with anchor: pos = anchor + dp, rot = dR @ R_anchor
+        T_abs = np.eye(4)
+        T_abs[:3, 3] = anchor_T[:3, 3] + dp_robot
+        T_abs[:3, :3] = dR_robot @ anchor_T[:3, :3]
         target_pose = mat_to_pose(T_abs)
 
         frame_count += 1

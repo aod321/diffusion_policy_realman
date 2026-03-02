@@ -71,18 +71,36 @@ def load_trajectory(path: str):
 
 
 def normalize_to_relative(transforms: np.ndarray) -> np.ndarray:
-    """T_rel[i] = T(0)^{-1} @ T(i). First frame becomes identity."""
-    T0_inv = np.linalg.inv(transforms[0])
-    return np.array([T0_inv @ T for T in transforms])
+    """World-frame deltas: dp_i = p_i - p_0, dR_i = R_i @ R_0^T.
+
+    Matches demo_real_robot_iphone.py where displacement is computed
+    in the ARKit world frame, not the phone's body frame.
+    First frame becomes identity.
+    """
+    R0_T = transforms[0, :3, :3].T
+    p0 = transforms[0, :3, 3]
+    out = np.empty_like(transforms)
+    for i in range(len(transforms)):
+        out[i] = np.eye(4)
+        out[i, :3, 3] = transforms[i, :3, 3] - p0
+        out[i, :3, :3] = transforms[i, :3, :3] @ R0_T
+    return out
 
 
 def apply_remap(transforms: np.ndarray, R: np.ndarray) -> np.ndarray:
-    """Conjugate remap: T' = R_hom @ T @ R_hom^{-1}."""
-    R_hom = np.eye(4)
-    R_hom[:3, :3] = R
-    R_hom_inv = np.eye(4)
-    R_hom_inv[:3, :3] = R.T
-    return np.array([R_hom @ T @ R_hom_inv for T in transforms])
+    """World-frame delta remap: dp' = R @ dp, dR' = R @ dR @ R^T.
+
+    Matches demo_real_robot_iphone.py axis_mapping convention:
+        dp_robot = M @ dp_arkit
+        dR_robot = M @ dR_arkit @ M^T
+    """
+    R_T = R.T
+    out = np.empty_like(transforms)
+    for i in range(len(transforms)):
+        out[i] = np.eye(4)
+        out[i, :3, 3] = R @ transforms[i, :3, 3]
+        out[i, :3, :3] = R @ transforms[i, :3, :3] @ R_T
+    return out
 
 
 def resample_trajectory(timestamps, transforms, target_hz):
@@ -310,11 +328,15 @@ def execute_replay(
             T_anchor = pose_to_mat(anchor_pose)
             print(f"Anchor EEF pose: {anchor_pose}")
 
-            # Compute absolute targets: T_anchor @ T_rel[i]
-            absolute_targets = [
-                mat_to_pose(T_anchor @ transforms[i])
-                for i in range(len(transforms))
-            ]
+            # Compose with anchor: pos = anchor + dp, rot = dR @ R_anchor
+            anchor_pos = T_anchor[:3, 3]
+            anchor_rot = T_anchor[:3, :3]
+            absolute_targets = []
+            for i in range(len(transforms)):
+                T_abs = np.eye(4)
+                T_abs[:3, 3] = anchor_pos + transforms[i, :3, 3]
+                T_abs[:3, :3] = transforms[i, :3, :3] @ anchor_rot
+                absolute_targets.append(mat_to_pose(T_abs))
             absolute_targets = np.asarray(absolute_targets, dtype=np.float64)
 
             print(f"\nStarting replay: {len(absolute_targets)} waypoints, "
