@@ -227,6 +227,27 @@ def main():
 
         topic_counts[topic] += 1
 
+        # ── 4b. Handle /replay/status control frames ─────────────────
+        if topic == "/replay/status":
+            try:
+                event = json.loads(payload_bytes)
+                if event.get("event") == "start":
+                    sid = event.get("session_id", "?")
+                    secs = event.get("total_secs", 0)
+                    msgs = event.get("message_count", 0)
+                    spd = event.get("speed", 1.0)
+                    print(f"\n  === New session: {sid} ({secs:.1f}s, {msgs} msgs, speed={spd:.1f}x) ===")
+                    anchor_T = None
+                    first_pose_T = None
+                    frame_count = 0
+                    last_msg_wall = None
+                elif event.get("event") == "stop":
+                    sid = event.get("session_id", "?")
+                    print(f"\n  === Session stopped: {sid} ({frame_count} frames) ===")
+            except Exception as e:
+                print(f"  [WARN] Failed to parse control frame: {e}")
+            continue
+
         # ── 5. Topic filter ──────────────────────────────────────────
         if args.pose_topic not in topic:
             continue

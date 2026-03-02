@@ -13,7 +13,7 @@ resolution-markers = [
 build-constraints = [
     { name = "cython", specifier = "<3" },
     { name = "numpy", specifier = "<2" },
-    { name = "setuptools", specifier = "<58" },
+    { name = "setuptools", specifier = "<71" },
 ]
 
 [[package]]
@@ -541,7 +541,7 @@ dependencies = [
     { name = "gymnasium", marker = "sys_platform == 'darwin'" },
     { name = "h5py" },
     { name = "hydra-core" },
-    { name = "imagecodecs" },
+    { name = "imagecodecs", marker = "platform_machine != 'aarch64'" },
     { name = "imageio" },
     { name = "imageio-ffmpeg" },
     { name = "ipykernel" },
@@ -576,6 +576,7 @@ dependencies = [
     { name = "tqdm" },
     { name = "wandb" },
     { name = "zarr" },
+    { name = "zeroconf" },
     { name = "zstandard" },
 ]
 
@@ -597,7 +598,7 @@ requires-dist = [
     { name = "gymnasium", marker = "sys_platform == 'darwin'", specifier = ">=0.28,<0.30" },
     { name = "h5py", specifier = "==3.7.0" },
     { name = "hydra-core", specifier = "==1.2.0" },
-    { name = "imagecodecs", specifier = "==2023.9.18" },
+    { name = "imagecodecs", marker = "platform_machine != 'aarch64'", specifier = "==2023.9.18" },
     { name = "imageio", specifier = "==2.22.0" },
     { name = "imageio-ffmpeg", specifier = "==0.4.7" },
     { name = "ipykernel", specifier = "==6.16" },
@@ -633,6 +634,7 @@ requires-dist = [
     { name = "tqdm", specifier = "==4.64.1" },
     { name = "wandb", specifier = "==0.13.3" },
     { name = "zarr", specifier = "==2.12.0" },
+    { name = "zeroconf", specifier = ">=0.148.0" },
     { name = "zstandard", specifier = ">=0.23.0" },
 ]
 
@@ -1075,11 +1077,20 @@ wheels = [
 ]
 
 [[package]]
+name = "ifaddr"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/ac/fb4c578f4a3256561548cd825646680edcadb9440f3f68add95ade1eb791/ifaddr-0.2.0.tar.gz", hash = "sha256:cc0cbfcaabf765d44595825fb96a99bb12c79716b73b44330ea38ee2b0c4aed4", size = 10485, upload-time = "2022-06-15T21:40:27.561Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/1f/19ebc343cc71a7ffa78f17018535adc5cbdd87afb31d7c34874680148b32/ifaddr-0.2.0-py3-none-any.whl", hash = "sha256:085e0305cfe6f16ab12d72e2024030f5d52674afad6911bb1eee207177b8a748", size = 12314, upload-time = "2022-06-15T21:40:25.756Z" },
+]
+
+[[package]]
 name = "imagecodecs"
 version = "2023.9.18"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5e/a7/394dd3fe67042c4234a74c47d4bf0b3f436d9af6c7fb5c889c3fd55f687a/imagecodecs-2023.9.18.tar.gz", hash = "sha256:bf4b4be4759fc3b27b5022228aada83e735744e4b7c204bcdccaa961c3f79d4d", size = 9444699, upload-time = "2023-09-19T03:16:53.046Z" }
 wheels = [
@@ -3227,6 +3238,27 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/51/8b/2480d3758e5e70765c2c9f3c13ca8fb576f1ad73c31f6a696d6720b7f562/zarr-2.12.0.tar.gz", hash = "sha256:515a31ee4bad6bb48ae05178c588ae49a02a35defa01dd9a3293306903368165", size = 3571172, upload-time = "2022-06-23T08:47:33.863Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/56/a6/817d25f7b77b695b1014030bfff90288846862a50d72c1ee85a8a233c040/zarr-2.12.0-py3-none-any.whl", hash = "sha256:3713f28f3fafa838f62bb442504da8e89bb969ecd1da09c9a96927536ec9be34", size = 185751, upload-time = "2022-06-23T08:47:31.251Z" },
+]
+
+[[package]]
+name = "zeroconf"
+version = "0.148.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ifaddr" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/67/46/10db987799629d01930176ae523f70879b63577060d63e05ebf9214aba4b/zeroconf-0.148.0.tar.gz", hash = "sha256:03fcca123df3652e23d945112d683d2f605f313637611b7d4adf31056f681702", size = 164447, upload-time = "2025-10-05T00:21:19.199Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ff/81/1f838cd174ca2f4ab7dbf8b1792325505480fd8f9a5a47c6fb0b63d7b26b/zeroconf-0.148.0-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:3a6e61c5b3905efed2137a07d84953ba4419795646fd18eccbd17018da2e965d", size = 1713675, upload-time = "2025-10-05T01:09:28.001Z" },
+    { url = "https://files.pythonhosted.org/packages/86/db/0eb06b898d1ca8875039f661279d1806e078fe6ed52885f9fd6e15b8dd45/zeroconf-0.148.0-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:ae41805df91ff657dd70179089df1d03e7ab756feb13dbcbc8a412cd8c50623e", size = 1688019, upload-time = "2025-10-05T01:09:30.466Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/00/5a69dd5753c93ab71a8f5b2f6294badaeb9629a15483073a37f8bd6fb3f2/zeroconf-0.148.0-cp39-cp39-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ff53a8d01c3b9a1e50606446ed07d534db5def55046ffdbbacac7888d9c699ae", size = 2199054, upload-time = "2025-10-05T01:09:32.38Z" },
+    { url = "https://files.pythonhosted.org/packages/93/96/e438063fdcdd3b0f1be68b7d8b203b8fda9fd982e2990b2a411bd7c9ad94/zeroconf-0.148.0-cp39-cp39-manylinux2014_armv7l.manylinux_2_17_armv7l.manylinux_2_31_armv7l.whl", hash = "sha256:45a51e1f507dfc3f621ecc23168aaa56783b33d4f5d676088f69f913f0b56073", size = 1972957, upload-time = "2025-10-05T01:09:34.681Z" },
+    { url = "https://files.pythonhosted.org/packages/68/87/218afba8263af3629d2c85d25473c117b343dc403b3c57b1dd4834b51ea5/zeroconf-0.148.0-cp39-cp39-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b41d1004e0356720ac81cddd7e4bd622c73be951b92c6b89ccaf6429996563ac", size = 2274996, upload-time = "2025-10-05T01:09:37.081Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/74/617700386783ba2e77dc94da0d3d05c5ce21f5a9944bad7355b39a74f024/zeroconf-0.148.0-cp39-cp39-musllinux_1_2_aarch64.whl", hash = "sha256:a53293291d683fc690c1cee0352f2c6dfc0f717f643e676a3c6f0df37a7f1b17", size = 2228791, upload-time = "2025-10-05T01:09:38.996Z" },
+    { url = "https://files.pythonhosted.org/packages/76/75/6c27281bbcb00d5c2d119ab2ed7cc8ab2ef813127a9afcc55d5050b68f2e/zeroconf-0.148.0-cp39-cp39-musllinux_1_2_armv7l.whl", hash = "sha256:04607192ef33f4c9280bbd1b716564f821a7935661b8a35be34ee1e0acc0657d", size = 2023056, upload-time = "2025-10-05T01:09:41.16Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/c3/b191110946bd59a999bc1aee2613b1669c1d1dbf161b0d182a56abfdbf6e/zeroconf-0.148.0-cp39-cp39-musllinux_1_2_x86_64.whl", hash = "sha256:2545561551a9ba684897785e6678f3c67fee8e13b09f9f88d0f69e570b540d5b", size = 2299045, upload-time = "2025-10-05T01:09:43.167Z" },
+    { url = "https://files.pythonhosted.org/packages/51/51/ada823f1515da3abbd24d136879980da890fad4508f17ee2b0238bff948e/zeroconf-0.148.0-cp39-cp39-win32.whl", hash = "sha256:d78e200a3830074c79c0a014595ace49a24afa6a8a2d903326f44751107afbfd", size = 1315239, upload-time = "2025-10-05T01:09:45.213Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/25/8d8a05b445adb3e7302c8f74f2f8f0a1e6b30a134a25ca0eb38af6c8db24/zeroconf-0.148.0-cp39-cp39-win_amd64.whl", hash = "sha256:0800443953f9b490ded275a84008631f441879e9164635a62a4f1c6e71f28bd0", size = 1532475, upload-time = "2025-10-05T01:09:47.516Z" },
 ]
 
 [[package]]
