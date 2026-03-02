@@ -89,8 +89,8 @@ def main():
         "--zmq", type=str, default=None,
         help="ZMQ endpoint (e.g. tcp://192.168.0.100:5560). Auto-discovered if omitted.")
     parser.add_argument(
-        "--robot_ip", "-ri", type=str, default="192.168.0.204",
-        help="Realman robot IP (default: 192.168.0.204)")
+        "--robot_ip", "-ri", type=str, default="10.90.0.210",
+        help="Realman robot IP (default: 10.90.0.210)")
     parser.add_argument(
         "--remap", default="realman",
         choices=list(REMAP_PRESETS.keys()),
