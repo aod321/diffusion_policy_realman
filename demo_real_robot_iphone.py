@@ -9,9 +9,10 @@ When engaged, moving the iPhone moves the robot EEF.
 When disengaged, iPhone movement is ignored (robot holds position).
 
 Movement modes (like SpaceMouse):
-  Default    — XY translation only (rotation & height locked).
-  Hold "R"   — rotation mode (translation locked, rotation unlocked).
-  Hold "F"   — unlock height (Z-axis), combinable with default XY.
+  Default         — XY translation only (rotation & height locked).
+  Hold "R"        — rotation mode (translation locked, rotation unlocked).
+  Hold "F"        — unlock height (Z-axis), combinable with default XY.
+  --full_dof flag — full 6-DOF mode: XYZ translation AND rotation simultaneously (always on).
 
 Recording control:
 Click the opencv window (make sure it's in focus).
@@ -107,9 +108,11 @@ def discover_iphone_teleop_bridge(timeout: float = 5.0):
 @click.option('--zmq', default=None, type=str, help="ZMQ endpoint of node_iphone.py (e.g. tcp://localhost:5556). If set, uses ZMQ instead of direct TCP.")
 @click.option('--no_discover', is_flag=True, default=False, help="Skip mDNS discovery, use direct TCP receiver.")
 @click.option('--discover_timeout', default=5.0, type=float, help="mDNS discovery timeout in seconds (default: 5).")
+@click.option('--full_dof', is_flag=True, default=False, help="Enable full 6-DOF mode permanently (XYZ translation + rotation simultaneously).")
 def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_latency,
          robot_type, follow, lookahead, iphone_port, pos_scale, rot_scale,
-         deadzone, rot_deadzone, filter_tau, zmq, no_discover, discover_timeout):
+         deadzone, rot_deadzone, filter_tau, zmq, no_discover, discover_timeout,
+         full_dof):
     if lookahead is None:
         lookahead = 0.1 if follow else 0.0
     dt = 1/frequency
@@ -271,7 +274,7 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
                     connected = iphone.is_connected
                     _rot = key_counter.is_key_held(KeyCode(char='r'))
                     _ht = key_counter.is_key_held(KeyCode(char='f'))
-                    mode_str = 'ROT' if _rot else ('XYZ' if _ht else 'XY')
+                    mode_str = '6DOF' if full_dof else ('ROT' if _rot else ('XYZ' if _ht else 'XY'))
                     line1 = f'Ep: {episode_id} | iPhone: {"ON" if connected else "OFF"} | Clutch: {"ENGAGED" if is_engaged else "OFF"} | {mode_str}'
                     if is_recording:
                         line1 += ' | REC'
@@ -304,12 +307,15 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
                 dpos, drot, has_data = iphone.get_relative_motion()
 
                 # SpaceMouse-style lock: default XY-only, hold keys to unlock
-                if not rot_mode:
+                if full_dof:
+                    # Full 6-DOF: XYZ translation + rotation simultaneously, nothing locked
+                    pass
+                elif not rot_mode:
                     drot = st.Rotation.identity()   # lock rotation
+                    if not height_unlock:
+                        dpos[2] = 0                  # lock Z
                 else:
-                    dpos = np.zeros(3)               # lock translation
-                if not height_unlock:
-                    dpos[2] = 0                      # lock Z
+                    dpos = np.zeros(3)               # lock translation (rotation-only mode)
 
                 if is_engaged and has_data and target_pose_ref is not None:
                     # Absolute: reference pose + total displacement

@@ -531,8 +531,9 @@ class RealmanInterpolationController(mp.Process):
                 pose_target = pose_interp(t_now)
 
                 # Dynamic follow: follow=True only while target is changing
-                target_delta = np.linalg.norm(pose_target[:3] - prev_target[:3])
-                if target_delta > 5e-5:  # ~0.05mm/frame ≈ 5mm/s @100Hz
+                pos_delta = np.linalg.norm(pose_target[:3] - prev_target[:3])
+                rot_delta = np.linalg.norm(pose_target[3:] - prev_target[3:])
+                if pos_delta > 5e-5 or rot_delta > 1e-4:  # pos: ~5mm/s, rot: ~0.01 rad/frame @100Hz
                     follow_cooldown = 50  # 500ms cooldown at 100Hz
                 if self.follow and follow_cooldown > 0:
                     frame_follow = True

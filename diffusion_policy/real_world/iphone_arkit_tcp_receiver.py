@@ -115,7 +115,7 @@ class IPhoneARKitTCPReceiver:
         self._lock = threading.Lock()
         self._T_ref = None
         self._filtered_dpos = np.zeros(3)
-        self._filtered_drotvec = np.zeros(3)
+        self._filtered_drot_quat = np.array([0., 0., 0., 1.])  # identity [x,y,z,w]
         self._last_filter_time = None
         self._has_data = False
         self._connected = False
@@ -164,9 +164,8 @@ class IPhoneARKitTCPReceiver:
         """
         with self._lock:
             dpos = self._filtered_dpos.copy()
-            drotvec = self._filtered_drotvec.copy()
+            drot = Rotation.from_quat(self._filtered_drot_quat)
             has_data = self._has_data
-        drot = Rotation.from_rotvec(drotvec)
         return dpos, drot, has_data
 
     def get_raw_arkit_data(self):
@@ -192,7 +191,7 @@ class IPhoneARKitTCPReceiver:
         with self._lock:
             self._T_ref = None
             self._filtered_dpos[:] = 0.0
-            self._filtered_drotvec[:] = 0.0
+            self._filtered_drot_quat[:] = [0., 0., 0., 1.]
             self._last_filter_time = None
             self._has_data = False
 
@@ -417,6 +416,12 @@ class IPhoneARKitTCPReceiver:
             else:
                 alpha = 1.0
             self._filtered_dpos += alpha * (dp_robot - self._filtered_dpos)
-            self._filtered_drotvec += alpha * (drotvec_robot - self._filtered_drotvec)
+            # Quaternion NLERP for rotation: avoids rotvec discontinuity at ±π
+            q_f = self._filtered_drot_quat
+            q_t = Rotation.from_rotvec(drotvec_robot).as_quat()  # includes rot_scale + deadzone
+            if np.dot(q_f, q_t) < 0:   # shortest-path: flip sign if quaternions diverge
+                q_t = -q_t
+            q_new = q_f + alpha * (q_t - q_f)
+            self._filtered_drot_quat = q_new / np.linalg.norm(q_new)
             self._last_filter_time = now
             self._has_data = True
