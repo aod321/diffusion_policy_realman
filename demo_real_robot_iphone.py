@@ -51,29 +51,36 @@ from diffusion_policy.real_world.keystroke_counter import (
 @click.option('--deadzone', default=0.001, type=float, help="Position deadzone in meters (default 1mm).")
 @click.option('--rot_deadzone', default=0.01, type=float, help="Rotation deadzone in radians (default ~0.6 deg).")
 @click.option('--filter_tau', default=0.05, type=float, help="EMA filter time constant in seconds (default 50ms, 0=off).")
+@click.option('--zmq', default=None, type=str, help="ZMQ endpoint of node_iphone.py (e.g. tcp://localhost:5556). If set, uses ZMQ instead of direct TCP.")
 def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_latency,
          robot_type, follow, lookahead, iphone_port, pos_scale, rot_scale,
-         deadzone, rot_deadzone, filter_tau):
+         deadzone, rot_deadzone, filter_tau, zmq):
     if lookahead is None:
         lookahead = 0.1 if follow else 0.0
     dt = 1/frequency
+    iphone_kwargs = dict(
+        pos_scale=pos_scale,
+        rot_scale=rot_scale,
+        axis_mapping=(
+            np.array([
+                [1,  0,  0],   # Robot X(right)   = ARKit X(right)
+                [0,  0, -1],   # Robot Y(forward) = -ARKit Z(backward)
+                [0,  1,  0],   # Robot Z(up)      = ARKit Y(up)
+            ]) if robot_type == 'realman' else None
+        ),
+        deadzone=deadzone,
+        rot_deadzone=rot_deadzone,
+        filter_tau=filter_tau,
+    )
+    if zmq:
+        from diffusion_policy.real_world.iphone_zmq_receiver import IPhoneZMQReceiver
+        iphone_receiver = IPhoneZMQReceiver(zmq_endpoint=zmq, **iphone_kwargs)
+    else:
+        iphone_receiver = IPhoneARKitReceiver(port=iphone_port, **iphone_kwargs)
+
     with SharedMemoryManager() as shm_manager:
         with KeystrokeCounter() as key_counter, \
-            IPhoneARKitReceiver(
-                port=iphone_port,
-                pos_scale=pos_scale,
-                rot_scale=rot_scale,
-                axis_mapping=(
-                    np.array([
-                        [1,  0,  0],   # Robot X(right)   = ARKit X(right)
-                        [0,  0, -1],   # Robot Y(forward) = -ARKit Z(backward)
-                        [0,  1,  0],   # Robot Z(up)      = ARKit Y(up)
-                    ]) if robot_type == 'realman' else None
-                ),
-                deadzone=deadzone,
-                rot_deadzone=rot_deadzone,
-                filter_tau=filter_tau,
-            ) as iphone, \
+            iphone_receiver as iphone, \
             RealEnv(
                 output_dir=output,
                 robot_ip=robot_ip,
@@ -166,6 +173,22 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
                             is_recording = False
                         # delete
                     stage = key_counter[Key.space]
+
+                # Handle iPhone teleop events (clutch from iPhone UI)
+                if hasattr(iphone, 'get_teleop_events'):
+                    for event in iphone.get_teleop_events():
+                        cmd = event.get('cmd', '')
+                        if cmd == 'clutch_engage' and not is_engaged:
+                            is_engaged = True
+                            iphone.reset_reference()
+                            target_pose_ref = target_pose.copy()
+                            prev_rot_mode = key_counter.is_key_held(KeyCode(char='r'))
+                            prev_height_unlock = key_counter.is_key_held(KeyCode(char='f'))
+                            print('Engaged! (from iPhone)')
+                        elif cmd == 'clutch_disengage' and is_engaged:
+                            is_engaged = False
+                            target_pose_ref = None
+                            print('Disengaged. (from iPhone)')
 
                 # visualize
                 if has_camera:
